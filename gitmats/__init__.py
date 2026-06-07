@@ -30,6 +30,29 @@ from gitmats.storage import StorageManager
 from gitmats.cow.engine import COWEngine
 from gitmats.git.backend import LocalGitBackend
 from gitmats.workspace import WorkspaceManager
+from gitmats.backends import (
+    VersioningBackend,
+    NullBackend,
+    LakeBaseBackend,
+    LakeBaseConfig,
+)
+from gitmats.exceptions import (
+    GitMatsError,
+    WorkspaceNotFoundError,
+    WorkspaceAlreadyExistsError,
+    WorkspaceLockedError,
+    InvalidWorkspaceIdError,
+    OriginalPathNotFoundError,
+    OriginalNotGitError,
+    GitOperationError,
+    BackendError,
+    ConfigurationError,
+    COWError,
+    MetadataError,
+    WorkspaceIntegrityError,
+    PermissionError,
+    StorageError,
+)
 
 __all__ = [
     # Version info
@@ -56,4 +79,25 @@ __all__ = [
     "COWEngine",
     "LocalGitBackend",
     "WorkspaceManager",
+    # Backends
+    "VersioningBackend",
+    "NullBackend",
+    "LakeBaseBackend",
+    "LakeBaseConfig",
+    # Exceptions
+    "GitMatsError",
+    "WorkspaceNotFoundError",
+    "WorkspaceAlreadyExistsError",
+    "WorkspaceLockedError",
+    "InvalidWorkspaceIdError",
+    "OriginalPathNotFoundError",
+    "OriginalNotGitError",
+    "GitOperationError",
+    "BackendError",
+    "ConfigurationError",
+    "COWError",
+    "MetadataError",
+    "WorkspaceIntegrityError",
+    "PermissionError",
+    "StorageError",
 ]
