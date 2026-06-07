@@ -27,6 +27,9 @@ from gitmats.models import (
 from gitmats.config import GitMatsConfig, load_config
 from gitmats.metadata import MetadataManager
 from gitmats.storage import StorageManager
+from gitmats.cow.engine import COWEngine
+from gitmats.git.backend import LocalGitBackend
+from gitmats.workspace import WorkspaceManager
 
 __all__ = [
     # Version info
@@ -50,4 +53,7 @@ __all__ = [
     # Managers
     "MetadataManager",
     "StorageManager",
+    "COWEngine",
+    "LocalGitBackend",
+    "WorkspaceManager",
 ]

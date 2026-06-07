@@ -277,7 +277,46 @@ class COWEngine:
             
             return self.metadata_manager.get_file_state(workspace_id, rel_path)
         
-        # Regular file but not tracked - must be new file
+        # Regular file in workspace
+        # Check if it was a linked file that was modified (symlink replaced)
+        if state and state.status == FileStatus.LINKED:
+            # Linked file was modified - treat as copy-up
+            original_hash = state.original_hash
+            original_size = state.original_size
+            
+            # Create COW copy from the modified file
+            cow_file = self.storage_manager.get_cow_path(workspace, rel_path)
+            cow_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(workspace_file, cow_file)
+            
+            # Create symlink to COW copy
+            workspace_file.unlink()
+            workspace_file.symlink_to(cow_file)
+            
+            # Record copy-up
+            self.metadata_manager.record_copy_up(
+                workspace_id=workspace_id,
+                rel_path=rel_path,
+                original_hash=original_hash,
+                original_size=original_size,
+                cow_path=str(cow_file),
+                cow_hash=self.calculate_file_hash(cow_file),
+                cow_size=cow_file.stat().st_size,
+                cow_mtime=datetime.fromtimestamp(cow_file.stat().st_mtime),
+            )
+            
+            # Log operation
+            self.metadata_manager.log_operation(OperationLog(
+                workspace_id=workspace_id,
+                operation_type=OperationType.COPY_UP,
+                relative_path=rel_path,
+                timestamp=datetime.now(),
+                success=True,
+            ))
+            
+            return self.metadata_manager.get_file_state(workspace_id, rel_path)
+        
+        # Truly new file (no existing state)
         cow_file = self.storage_manager.get_cow_path(workspace, rel_path)
         cow_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(workspace_file, cow_file)
