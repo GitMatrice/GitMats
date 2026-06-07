@@ -540,7 +540,7 @@ class MetadataManager:
         conn = sqlite3.connect(str(workspace.metadata_db))
         
         conn.execute("""
-            INSERT INTO file_state (
+            INSERT OR REPLACE INTO file_state (
                 relative_path, status, original_hash, original_size, original_mtime
             ) VALUES (?, 'linked', ?, ?, ?)
         """, (
