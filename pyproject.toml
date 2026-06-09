@@ -2,9 +2,27 @@
 name = "gitmats"
 version = "0.1.0"
 description = "Git Materialized Virtual Workspace - Zero-disk overhead workspace management with COW and Git integration"
+readme = "README.md"
 requires-python = ">=3.10"
-authors = [{name = "GitMats Team"}]
-license = {text = "MIT"}
+authors = [{name = "GitMats Contributors"}]
+license = {text = "Apache-2.0"}
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Version Control :: Git",
+    "Topic :: System :: Filesystems",
+]
+keywords = ["git", "workspace", "copy-on-write", "cow", "virtual", "symlink"]
 
 dependencies = [
     "click>=8.0",
@@ -21,12 +39,31 @@ dev = [
     "mypy>=1.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/GitMatrice/GitMats"
+Documentation = "https://github.com/GitMatrice/GitMats#readme"
+Repository = "https://github.com/GitMatrice/GitMats.git"
+Issues = "https://github.com/GitMatrice/GitMats/issues"
+
 [project.scripts]
 gmt = "gitmats.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gitmats"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "gitmats/",
+    "tests/",
+    "docs/",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

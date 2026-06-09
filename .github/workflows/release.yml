@@ -1,0 +1,96 @@
+name: Build and Publish Package
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write  # Required for PyPI trusted publishing (OIDC)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  test-wheel:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install wheel and verify
+        run: |
+          pip install dist/gitmats*.whl
+          gmt --help
+
+  publish-pypi:
+    needs: test-wheel
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/gitmats
+    steps:
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Optional: Publish to GitHub Packages
+  # Uncomment if you want to publish to GitHub Packages
+  # publish-github:
+  #   needs: test-wheel
+  #   runs-on: ubuntu-latest
+  #   if: github.event_name == 'release'
+  #   permissions:
+  #     packages: write
+  #   steps:
+  #     - name: Download wheel artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: dist
+  #         path: dist/
+  #
+  #     - name: Publish to GitHub Packages
+  #       run: |
+  #         pip install twine
+  #         twine upload --repository-url https://pkg.github.com/${{ github.repository_owner }} dist/*
+  #       env:
+  #         TWINE_USERNAME: ${{ github.actor }}
+  #         TWINE_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
