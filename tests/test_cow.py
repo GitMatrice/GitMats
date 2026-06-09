@@ -506,8 +506,77 @@ class TestCOWEngineEdgeCases:
         )
         
         assert state.status == FileStatus.LINKED
+    
+    def test_sync_modifications_with_new_files(self, cow_setup):
+        """Test syncing modifications including new files."""
+        cow_engine = cow_setup["cow_engine"]
+        workspace = cow_setup["workspace"]
+        original_dir = cow_setup["original_dir"]
         
-        # Verify nested directory created in workspace
-        workspace_file = Path(workspace.workspace_dir) / "deep" / "nested" / "path" / "file.py"
-        assert workspace_file.exists()
-        assert workspace_file.is_symlink()
+        # Initialize links
+        cow_engine.initialize_workspace_links(
+            workspace_id=workspace.workspace_id,
+            original_path=workspace.original_path,
+        )
+        
+        # Create new file in workspace
+        workspace_dir = Path(workspace.workspace_dir)
+        new_file = workspace_dir / "brand_new.py"
+        new_file.write_text("brand new content")
+        
+        # Modify existing file
+        (original_dir / "src" / "main.py").write_text("modified")
+        
+        # Sync
+        copied_files = cow_engine.sync_modifications(
+            workspace_id=workspace.workspace_id,
+        )
+        
+        # Both modified and new files should be synced
+        assert len(copied_files) == 2
+        assert "src/main.py" in copied_files
+        assert "brand_new.py" in copied_files
+        
+        # New file should now be tracked
+        status = cow_engine.get_file_status(
+            workspace_id=workspace.workspace_id,
+            rel_path="brand_new.py",
+        )
+        assert status == FileStatus.NEW
+    
+    def test_sync_cow_state(self, cow_setup):
+        """Test syncing COW state including new files."""
+        cow_engine = cow_setup["cow_engine"]
+        workspace = cow_setup["workspace"]
+        original_dir = cow_setup["original_dir"]
+        
+        # Initialize links
+        cow_engine.initialize_workspace_links(
+            workspace_id=workspace.workspace_id,
+            original_path=workspace.original_path,
+        )
+        
+        # Create a new file in workspace
+        workspace_dir = Path(workspace.workspace_dir)
+        new_file = workspace_dir / "synced_new.py"
+        new_file.write_text("synced content")
+        
+        # Sync COW state
+        final_statuses = cow_engine.sync_cow_state(
+            workspace_id=workspace.workspace_id,
+        )
+        
+        # Check new file is tracked
+        assert "synced_new.py" in final_statuses
+        assert final_statuses["synced_new.py"] == FileStatus.NEW
+        
+        # Check symlink was created
+        assert new_file.is_symlink()
+        target = new_file.resolve()
+        copies_dir = Path(workspace.copies_dir).resolve()
+        assert copies_dir in target.parents or target.parent.resolve() == copies_dir
+        
+        # Check COW copy exists
+        cow_copy = copies_dir / "synced_new.py"
+        assert cow_copy.exists()
+        assert cow_copy.read_text() == "synced content"

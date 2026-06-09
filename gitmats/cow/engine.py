@@ -135,9 +135,20 @@ class COWEngine:
         original = Path(original_path)
         states = {}
         
+        # Excluded directories and patterns (should not be tracked)
+        EXCLUDED_DIRS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", 
+                         "node_modules", ".idea", ".vscode"}
+        
         for file_path in original.rglob("*"):
-            # Skip .git directory
-            if file_path.is_file() and not any(p.name == ".git" for p in file_path.parents):
+            # Skip excluded directories
+            if any(p.name in EXCLUDED_DIRS for p in file_path.parents):
+                continue
+            
+            # Skip .egg-info directories and files
+            if file_path.name.endswith(".egg-info") or any(p.name.endswith(".egg-info") for p in file_path.parents):
+                continue
+            
+            if file_path.is_file():
                 rel_path = str(file_path.relative_to(original))
                 
                 state = self.create_linked_file(
@@ -238,6 +249,11 @@ class COWEngine:
         
         # Check if linked
         if workspace_file.is_symlink():
+            # Check if this is a NEW file already symlinked to COW copy
+            if state and state.status == FileStatus.NEW:
+                # Already tracked as NEW - nothing to do
+                return state
+            
             # Get original info
             original_target = workspace_file.resolve()
             original_hash = state.original_hash if state else self.calculate_file_hash(original_target)
@@ -319,7 +335,36 @@ class COWEngine:
         # Truly new file (no existing state)
         cow_file = self.storage_manager.get_cow_path(workspace, rel_path)
         cow_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(workspace_file, cow_file)
+        
+        # Check if workspace file is already symlinked to COW copy
+        if workspace_file.is_symlink():
+            target = workspace_file.resolve()
+            copies_dir = Path(workspace.copies_dir).resolve()
+            
+            # Check if symlink already points to copies directory
+            if copies_dir in target.parents or target.parent.resolve() == copies_dir:
+                # Already correctly symlinked - verify COW copy exists
+                if target.exists():
+                    # Just return existing state or create metadata if missing
+                    if not state:
+                        self.metadata_manager.record_new_file(
+                            workspace_id=workspace_id,
+                            rel_path=rel_path,
+                            cow_path=str(target),
+                            cow_hash=self.calculate_file_hash(target),
+                            cow_size=target.stat().st_size,
+                        )
+                    return self.metadata_manager.get_file_state(workspace_id, rel_path)
+        
+        # Copy workspace file to COW storage (resolve symlink if needed)
+        source_file = workspace_file.resolve() if workspace_file.is_symlink() else workspace_file
+        if source_file != cow_file:
+            shutil.copy2(source_file, cow_file)
+        
+        # Replace workspace file with symlink to COW copy
+        if workspace_file.exists() or workspace_file.is_symlink():
+            workspace_file.unlink()
+        workspace_file.symlink_to(cow_file)
         
         self.metadata_manager.record_new_file(
             workspace_id=workspace_id,
@@ -328,6 +373,15 @@ class COWEngine:
             cow_hash=self.calculate_file_hash(cow_file),
             cow_size=cow_file.stat().st_size,
         )
+        
+        # Log operation
+        self.metadata_manager.log_operation(OperationLog(
+            workspace_id=workspace_id,
+            operation_type=OperationType.COPY_UP,
+            relative_path=rel_path,
+            timestamp=datetime.now(),
+            success=True,
+        ))
         
         return self.metadata_manager.get_file_state(workspace_id, rel_path)
     
@@ -487,6 +541,10 @@ class COWEngine:
             target = workspace_file.resolve()
             
             if state:
+                # Check state.status first to distinguish NEW from COPIED
+                if state.status == FileStatus.NEW:
+                    return FileStatus.NEW
+                
                 cow_dir = Path(workspace.copies_dir).resolve()
                 target_parent = target.parent.resolve() if target.parent.exists() else target.parent
                 
@@ -537,7 +595,17 @@ class COWEngine:
         tracked_paths = {s.relative_path for s in tracked_states}
         
         # Scan workspace directory
+        # Excluded directories and patterns (should not be tracked)
+        EXCLUDED_DIRS = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", 
+                         "node_modules", ".idea", ".vscode", "*.egg-info"}
+        
         for file_path in workspace_dir.rglob("*"):
+            # Skip excluded directories
+            if any(p.name in EXCLUDED_DIRS or p.name.endswith(".egg-info") for p in file_path.parents):
+                continue
+            if file_path.name in EXCLUDED_DIRS or file_path.name.endswith(".egg-info"):
+                continue
+            
             if file_path.is_file() or file_path.is_symlink():
                 rel_path = str(file_path.relative_to(workspace_dir))
                 
@@ -559,7 +627,7 @@ class COWEngine:
     
     def sync_modifications(self, workspace_id: str) -> list[str]:
         """
-        Perform copy-up for all modified files.
+        Perform copy-up for all modified and new files.
         
         Args:
             workspace_id: Workspace identifier.
@@ -589,5 +657,36 @@ class COWEngine:
                     if state and state.status == FileStatus.LINKED:
                         self.copy_up(workspace_id, rel_path)
                         copied_files.append(rel_path)
+            elif status == FileStatus.NEW:
+                # New file - perform copy-up to track it
+                self.copy_up(workspace_id, rel_path)
+                copied_files.append(rel_path)
         
         return copied_files
+    
+    def sync_cow_state(self, workspace_id: str) -> dict[str, FileStatus]:
+        """
+        Sync all COW state for workspace.
+        
+        Scans workspace for modifications and new files, performs copy-up
+        for all untracked changes, and updates metadata.
+        
+        Args:
+            workspace_id: Workspace identifier.
+        
+        Returns:
+            Dictionary of paths and their final status after sync.
+        """
+        workspace = self.metadata_manager.get_workspace(workspace_id)
+        if not workspace:
+            return {}
+        
+        # Perform copy-up for all modified and new files
+        copied_files = self.sync_modifications(workspace_id)
+        
+        # Get final statuses
+        final_statuses = {}
+        for rel_path in copied_files:
+            final_statuses[rel_path] = self.get_file_status(workspace_id, rel_path)
+        
+        return final_statuses

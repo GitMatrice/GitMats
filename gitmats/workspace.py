@@ -181,7 +181,15 @@ class WorkspaceManager:
         self.metadata_manager.create_workspace(workspace)
         
         # Setup Git BEFORE COW symlinks (worktree requires empty directory)
-        self.git_backend.setup_git(workspace, branch_name)
+        git_success = self.git_backend.setup_git(workspace, branch_name)
+        if not git_success:
+            # Clean up the created structure before raising
+            self.storage_manager.destroy_workspace_structure(workspace_id)
+            self.metadata_manager.delete_workspace(workspace_id)
+            raise RuntimeError(
+                f"Failed to setup Git for workspace '{workspace_id}'. "
+                f"Git mode: {git_mode.value}, Original: {original_path}"
+            )
         
         # Create COW symlinks for all files
         self.cow_engine.initialize_workspace_links(workspace_id, original_path)
@@ -438,6 +446,9 @@ class WorkspaceManager:
         workspace = self.metadata_manager.get_workspace(workspace_id)
         if not workspace:
             return {}
+        
+        # First, sync COW state to detect any new/modified files
+        self.cow_engine.sync_cow_state(workspace_id)
         
         # Scan file states
         file_states = self.metadata_manager.list_file_states(workspace_id)

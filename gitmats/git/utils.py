@@ -106,6 +106,49 @@ def get_current_branch(repo_path: Path) -> Optional[str]:
         return None
 
 
+def branch_exists(repo_path: Path, branch_name: str) -> bool:
+    """
+    Check if a branch exists.
+    
+    Args:
+        repo_path: Path to repository.
+        branch_name: Branch name to check.
+    
+    Returns:
+        True if branch exists.
+    """
+    try:
+        run_git_command(repo_path, ["rev-parse", "--verify", branch_name])
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def get_worktree_branches(repo_path: Path) -> set[str]:
+    """
+    Get branches that are currently checked out in worktrees.
+    
+    Args:
+        repo_path: Path to main repository.
+    
+    Returns:
+        Set of branch names that are checked out in worktrees.
+    """
+    try:
+        result = run_git_command(repo_path, ["worktree", "list", "--porcelain"])
+        branches = set()
+        for line in result.stdout.strip().split("\n"):
+            if line.startswith("HEAD ") or line.startswith("branch "):
+                # Extract branch name from "branch refs/heads/branch_name"
+                if line.startswith("branch "):
+                    branch_ref = line.split()[1]
+                    if branch_ref.startswith("refs/heads/"):
+                        branches.add(branch_ref[len("refs/heads/"):])
+        return branches
+    except subprocess.CalledProcessError:
+        return set()
+
+
 def get_current_head(repo_path: Path) -> Optional[str]:
     """
     Get current HEAD commit SHA.

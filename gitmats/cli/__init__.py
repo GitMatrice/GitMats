@@ -374,6 +374,89 @@ def unlock_workspace(ctx: click.Context, workspace_id: str) -> None:
 
 # ===== Version Control Commands =====
 
+@gmt.command("add")
+@click.argument("workspace_id")
+@click.argument("files", nargs=-1, required=False)
+@click.option("--all", "-A", is_flag=True, help="Stage all changes (same as no files argument)")
+@click.pass_context
+def add_files(
+    ctx: click.Context,
+    workspace_id: str,
+    files: tuple[str, ...],
+    all: bool,
+) -> None:
+    """Stage changes for commit.
+    
+    Examples:
+      gmt add testws2              # Stage all modified/new files
+      gmt add testws2 --all        # Same as above
+      gmt add testws2 lak*         # Stage files matching pattern
+      gmt add testws2 file1.py file2.py  # Stage specific files
+    """
+    manager: WorkspaceManager = ctx.obj["manager"]
+    
+    workspace = manager.get_workspace(workspace_id)
+    if not workspace:
+        click.echo(color(f"Error: Workspace '{workspace_id}' not found", "red"), err=True)
+        sys.exit(1)
+    
+    if workspace.status != WorkspaceStatus.ACTIVE:
+        click.echo(color(f"Error: Workspace '{workspace_id}' is not active", "red"), err=True)
+        sys.exit(1)
+    
+    try:
+        import fnmatch
+        
+        # Sync COW state first to detect any new files
+        manager.cow_engine.sync_cow_state(workspace_id)
+        
+        # Get all NEW/COPIED files
+        from gitmats.models import FileStatus
+        copied_states = manager.metadata_manager.list_file_states(
+            workspace.workspace_id,
+            status=FileStatus.COPIED,
+        )
+        new_states = manager.metadata_manager.list_file_states(
+            workspace.workspace_id,
+            status=FileStatus.NEW,
+        )
+        all_changes = [s.relative_path for s in copied_states + new_states]
+        
+        # Determine what to stage
+        if files:
+            # Match patterns against available changes
+            files_to_stage = []
+            for pattern in files:
+                matches = fnmatch.filter(all_changes, pattern)
+                if matches:
+                    files_to_stage.extend(matches)
+                else:
+                    # Check if it's a literal path that exists
+                    if pattern in all_changes:
+                        files_to_stage.append(pattern)
+                    else:
+                        click.echo(color(f"warning: '{pattern}' did not match any tracked files", "yellow"))
+        else:
+            # No files specified or --all flag: stage all
+            files_to_stage = all_changes
+        
+        if files_to_stage:
+            staged = manager.git_backend.stage_cow_files(workspace, files_to_stage)
+            
+            if staged:
+                click.echo(color(f"Staged {len(staged)} files:", "green"))
+                for f in staged:
+                    click.echo(f"  {f}")
+            else:
+                click.echo(color("Nothing to stage", "yellow"))
+        else:
+            click.echo(color("Nothing to stage", "yellow"))
+        
+    except Exception as e:
+        click.echo(color(f"Error: {e}", "red"), err=True)
+        sys.exit(1)
+
+
 @gmt.command("commit")
 @click.argument("workspace_id")
 @click.option("--message", "-m", required=True, help="Commit message")

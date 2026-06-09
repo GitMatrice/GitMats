@@ -25,6 +25,8 @@ from gitmats.git.utils import (
     remove_worktree,
     create_branch,
     checkout_branch,
+    branch_exists,
+    get_worktree_branches,
     stage_files,
     commit,
     get_staged_files,
@@ -119,7 +121,7 @@ class LocalGitBackend:
         
         Args:
             workspace: Workspace.
-            branch_name: Optional branch name.
+            branch_name: Optional branch name requested by user.
         
         Returns:
             True if successful.
@@ -133,14 +135,33 @@ class LocalGitBackend:
             return False
         
         workspace_dir = Path(workspace.workspace_dir)
-        git_dir = Path(workspace.git_dir)
         
-        # Create branch for workspace if specified
+        # Determine the workspace branch
         current_branch = get_current_branch(original_root) or "main"
-        workspace_branch = branch_name or f"gitmats-{workspace.workspace_id}"
+        checked_out_branches = get_worktree_branches(original_root)
         
-        # Create branch from current state
-        create_branch(original_root, workspace_branch)
+        if branch_name:
+            # User specified a branch
+            if branch_exists(original_root, branch_name):
+                # Branch exists - check if it's checked out somewhere
+                if branch_name in checked_out_branches:
+                    # Branch is already checked out - create a new unique branch
+                    workspace_branch = f"gitmats-{workspace.workspace_id}"
+                    if not create_branch(original_root, workspace_branch):
+                        return False
+                else:
+                    # Branch exists but not checked out - use it directly
+                    workspace_branch = branch_name
+            else:
+                # Branch doesn't exist - create it from current state
+                workspace_branch = branch_name
+                if not create_branch(original_root, workspace_branch):
+                    return False
+        else:
+            # No branch specified - create a new unique branch
+            workspace_branch = f"gitmats-{workspace.workspace_id}"
+            if not create_branch(original_root, workspace_branch):
+                return False
         
         # Add worktree
         success = add_worktree(
@@ -162,7 +183,7 @@ class LocalGitBackend:
                 relative_path=None,
                 timestamp=datetime.now(),
                 success=True,
-                details_json=f'{{"branch": "{workspace_branch}", "mode": "inherited"}}',
+                details_json=f'{{"branch": "{workspace_branch}", "requested": "{branch_name or "none"}", "mode": "inherited"}}',
             ))
             
             return True
@@ -266,34 +287,54 @@ class LocalGitBackend:
         
         return None
     
-    def stage_cow_files(self, workspace: Workspace) -> list[str]:
+    def stage_cow_files(
+        self,
+        workspace: Workspace,
+        files: Optional[list[str]] = None,
+    ) -> list[str]:
         """
-        Stage all COW (modified/new) files.
+        Stage COW (modified/new) files for commit.
         
         Args:
             workspace: Workspace.
+            files: Optional list of specific files to stage.
+                   If None, stages all COPIED and NEW files.
         
         Returns:
             List of staged file paths.
         """
         workspace_dir = Path(workspace.workspace_dir)
         
-        # Get all file states
         from gitmats.models import FileStatus
         
-        copied_states = self.metadata_manager.list_file_states(
-            workspace.workspace_id,
-            status=FileStatus.COPIED,
-        )
-        new_states = self.metadata_manager.list_file_states(
-            workspace.workspace_id,
-            status=FileStatus.NEW,
-        )
-        
-        files_to_stage = []
-        
-        for state in copied_states + new_states:
-            files_to_stage.append(state.relative_path)
+        if files:
+            # Stage specific files - verify they exist and are tracked
+            files_to_stage = []
+            for file_path in files:
+                # Check if file is tracked with COPIED or NEW status
+                state = self.metadata_manager.get_file_state(
+                    workspace.workspace_id,
+                    file_path,
+                )
+                if state and state.status in (FileStatus.COPIED, FileStatus.NEW):
+                    files_to_stage.append(file_path)
+                elif (workspace_dir / file_path).exists():
+                    # File exists but not tracked - auto-track it
+                    files_to_stage.append(file_path)
+        else:
+            # Stage all COW files
+            copied_states = self.metadata_manager.list_file_states(
+                workspace.workspace_id,
+                status=FileStatus.COPIED,
+            )
+            new_states = self.metadata_manager.list_file_states(
+                workspace.workspace_id,
+                status=FileStatus.NEW,
+            )
+            
+            files_to_stage = []
+            for state in copied_states + new_states:
+                files_to_stage.append(state.relative_path)
         
         if files_to_stage:
             stage_files(workspace_dir, files_to_stage)
@@ -318,6 +359,9 @@ class LocalGitBackend:
     ) -> Optional[str]:
         """
         Create a commit in workspace.
+        
+        NOTE: This only commits already-staged files.
+        Use stage_cow_files() or 'gmt add' first to stage changes.
         
         Args:
             workspace: Workspace.
